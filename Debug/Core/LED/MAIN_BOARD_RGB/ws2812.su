@@ -1,0 +1,7 @@
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:19:6:WS2812_Init	24	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:30:6:WS2812_SetGlobalBrightness	16	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:37:6:WS2812_SetColor	32	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:52:6:WS2812_Send	32	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:88:6:main_led	24	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:97:6:WS2812_Update	8	static
+../Core/LED/MAIN_BOARD_RGB/ws2812.c:109:13:HAL_TIM_PWM_PulseFinishedCallback	16	static

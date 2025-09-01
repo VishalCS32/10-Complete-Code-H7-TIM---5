@@ -1,0 +1,5 @@
+../Drivers/CMSIS/Include/core_cm7.h:2156:34:__NVIC_SystemReset	4	static,ignoring_inline_asm
+../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_ll_usart.h:3009:26:LL_USART_IsActiveFlag_TC	16	static
+../Core/CMD/cmd.c:16:9:is_cmd_mode	4	static
+../Core/CMD/cmd.c:20:6:strip_brackets	32	static
+../Core/CMD/cmd.c:28:6:process_command	280	static,ignoring_inline_asm
