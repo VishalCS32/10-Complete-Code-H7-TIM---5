@@ -178,6 +178,7 @@ int main(void)
   MX_I2C1_Init();
   MX_UART4_Init();
   MX_TIM5_Init();
+  MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
   LL_USART_EnableIT_RXNE(USART6);
@@ -392,6 +393,9 @@ int main(void)
   main_led(0, 0, 255, 0, 0);
   HAL_Delay(500);
 
+  main_led(0, 0, 255, 0, 1);
+
+
 //  while (Is_iBus_Throttle_Armed() == 0) {
 //	  // Debug: Print loop status
 //	  static uint32_t last_loop_print = 0;
@@ -434,6 +438,7 @@ int main(void)
 
   /* *********** iBus Throttle Check END ************ */
 
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -449,17 +454,36 @@ int main(void)
 	  {
 		  tim7_1ms_flag = 0;
 
-		  if (ICM42688P_DataReady())
-		  {
-			  // Update all sensor data
-			  ICM42688P_UpdateAllData_Radians();
+//==============================================================================
 
-			  // Print gyroscope data in radians per second
-			  printf("Gyro X: %.6f, Y: %.6f, Z: %.6f\n",
-					  ICM42688P.gyro_x_rad,
-					  ICM42688P.gyro_y_rad,
-					  ICM42688P.gyro_z_rad);
-		  }
+//		  if (ICM42688P_DataReady())
+//		  {
+//			  // Update all sensor data
+//			  ICM42688P_UpdateAllData_Radians();
+//
+//			  // Print gyroscope data in radians per second
+////			  printf("Gyro X: %.6f, Y: %.6f, Z: %.6f\n",
+////					  ICM42688P.gyro_x_rad,						// To be used ONLY FOR TESTING
+////					  ICM42688P.gyro_y_rad,
+////					  ICM42688P.gyro_z_rad);
+//
+//			  // Print accel data in radians per second
+//			  printf("Accel X: %.6f, Y: %.6f, Z: %.6f\n",
+//					  ICM42688P.acc_x,
+//					  ICM42688P.acc_y,
+//					  ICM42688P.acc_z);
+
+//==============================================================================
+//
+		  printf("Gyro X: %.6f, Y: %.6f, Z: %.6f || Accel X: %.6f, Y: %.6f, Z: %.6f\n",
+				  ICM42688P.gyro_x,
+				  ICM42688P.gyro_y,
+				  ICM42688P.gyro_z,
+				  ICM42688P.acc_x,
+				  ICM42688P.acc_y,
+				  ICM42688P.acc_z);
+
+//		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
 	  }
 
 	  if(tim7_20ms_flag == 1)
@@ -473,7 +497,7 @@ int main(void)
 	  {
 		  tim7_50ms_flag = 0;
 
-		  main_led(0, 0, 255, 0, 0);
+//		  main_led(0, 0, 255, 0, 0);
 
 	  }
 
@@ -490,14 +514,43 @@ int main(void)
 	  {
 		  tim7_200ms_flag = 0;
 
-		  main_led(0, 0, 255, 0, 1);
+//		  main_led(0, 0, 255, 0, 1);
 	  }
 
 	  if(tim7_1000ms_flag == 1)
 	  {
 		  tim7_1000ms_flag = 0;
+
+//		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
+
+	  }
+
+
+	  if(ICM42688P_DataReady() == 1)
+	  {
+
+		  LL_GPIO_TogglePin(GPIOE, LL_GPIO_PIN_4);
+
+		  ICM42688P_Get3AxisGyroRawData(&ICM42688P.gyro_x_raw);
+		  ICM42688P_Get3AxisAccRawData(&ICM42688P.acc_x_raw);
+
+		  ICM42688P.gyro_x = ICM42688P.gyro_x_raw * 2000.f / 32768.f;
+		  ICM42688P.gyro_y = ICM42688P.gyro_y_raw * 2000.f / 32768.f;
+		  ICM42688P.gyro_z = ICM42688P.gyro_z_raw * 2000.f / 32768.f;
+
+		  ICM42688P.gyro_x = -ICM42688P.gyro_x;
+		  ICM42688P.gyro_z = -ICM42688P.gyro_z;
+
+		  ICM42688P.acc_x = ICM42688P.acc_x_raw * 0.0004883f;
+		  ICM42688P.acc_y = ICM42688P.acc_y_raw * 0.0004883f;
+		  ICM42688P.acc_z = ICM42688P.acc_z_raw * 0.0004883f;
+
+
 		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
 
+
+		  //printf("%d,%d,%d\n", ICM20602.gyro_x_raw, ICM20602.gyro_y_raw, ICM20602.gyro_z_raw);
+//		  printf("%d,%d,%d\n", (int)(ICM42688P.gyro_x*100), (int)(ICM42688P.gyro_y*100), (int)(ICM42688P.gyro_z*100));
 	  }
 
   }

@@ -16,4 +16,5 @@
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_ll_dma.h:956:22:LL_DMA_SetStreamPriorityLevel	1
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_ll_dma.h:1238:22:LL_DMA_SetPeriphRequest	3
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_ll_dma.h:1668:22:LL_DMA_DisableFifoMode	1
-../Core/Src/spi.c:28:6:MX_SPI3_Init	2
+../Core/Src/spi.c:28:6:MX_SPI2_Init	2
+../Core/Src/spi.c:142:6:MX_SPI3_Init	2

@@ -16,6 +16,7 @@ RM := rm -rf
 -include Core/RECEIVER/FS-iA6B/subdir.mk
 -include Core/LED/MAIN_BOARD_RGB/subdir.mk
 -include Core/IMU/ICM42688P/subdir.mk
+-include Core/IMU/ICM20948/subdir.mk
 -include Core/HMC5883L/subdir.mk
 -include Core/EEPROM/subdir.mk
 -include Core/CMD/subdir.mk

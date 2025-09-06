@@ -73,10 +73,12 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_1_Pin GPIO_PIN_3
 #define LED_1_GPIO_Port GPIOE
-#define SPI3_INT_Pin GPIO_PIN_4
-#define SPI3_INT_GPIO_Port GPIOE
 #define LED_2_Pin GPIO_PIN_5
 #define LED_2_GPIO_Port GPIOE
+#define SPI2_INT_Pin GPIO_PIN_13
+#define SPI2_INT_GPIO_Port GPIOC
+#define SPI2_CS_Pin GPIO_PIN_8
+#define SPI2_CS_GPIO_Port GPIOE
 #define SPI3_CS_Pin GPIO_PIN_15
 #define SPI3_CS_GPIO_Port GPIOA
 

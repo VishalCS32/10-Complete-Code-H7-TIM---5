@@ -34,13 +34,28 @@ void ICM42688P_GPIO_SPI_Initialization(void)
 	GPIO_InitStruct.Alternate = LL_GPIO_AF_6; // SPI3 alternate function for STM32H7
 	LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+	SPI_InitStruct.TransferDirection = LL_SPI_FULL_DUPLEX;
+	SPI_InitStruct.Mode = LL_SPI_MODE_MASTER;
+	SPI_InitStruct.DataWidth = LL_SPI_DATAWIDTH_8BIT;
+	SPI_InitStruct.ClockPolarity = LL_SPI_POLARITY_HIGH;
+	SPI_InitStruct.ClockPhase = LL_SPI_PHASE_2EDGE;
+	SPI_InitStruct.NSS = LL_SPI_NSS_SOFT;
+	SPI_InitStruct.BaudRate = LL_SPI_BAUDRATEPRESCALER_DIV8; //ICM-20602 MAX SPI CLK is 10MHz. But DIV2(42MHz) is available.
+	SPI_InitStruct.BitOrder = LL_SPI_MSB_FIRST;
+	SPI_InitStruct.CRCCalculation = LL_SPI_CRCCALCULATION_DISABLE;
+	SPI_InitStruct.CRCPoly = 10;
+	LL_SPI_Init(ICM42688P_SPI_CHANNEL, &SPI_InitStruct);
+	LL_SPI_SetStandard(ICM42688P_SPI_CHANNEL, LL_SPI_PROTOCOL_MOTOROLA);
+
 	/**ICM42688P GPIO Control Configuration
 	 * PA15  ------> ICM42688P_SPI_CS_PIN (output)
 	 * PC8   ------> ICM42688P_INT1_PIN (input)
 	 */
 
 	/* Chip Select Pin */
-	LL_GPIO_SetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
+//	LL_GPIO_SetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
+
+	LL_GPIO_ResetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
 
 	GPIO_InitStruct.Pin = ICM42688P_SPI_CS_PIN;
 	GPIO_InitStruct.Mode = LL_GPIO_MODE_OUTPUT;
@@ -55,35 +70,20 @@ void ICM42688P_GPIO_SPI_Initialization(void)
 	GPIO_InitStruct.Pull = LL_GPIO_PULL_UP;
 	LL_GPIO_Init(ICM42688P_INT1_PORT, &GPIO_InitStruct);
 
-	/* STM32H7 SPI3 configuration - Fixed for proper LL driver usage */
-	// Disable SPI first
-	LL_SPI_Disable(ICM42688P_SPI_CHANNEL);
-
-	// Configure SPI3 - STM32H7 style
-	LL_SPI_SetBaudRatePrescaler(ICM42688P_SPI_CHANNEL, LL_SPI_BAUDRATEPRESCALER_DIV32);
-	LL_SPI_SetTransferDirection(ICM42688P_SPI_CHANNEL, LL_SPI_FULL_DUPLEX);
-	LL_SPI_SetClockPhase(ICM42688P_SPI_CHANNEL, LL_SPI_PHASE_2EDGE);
-	LL_SPI_SetClockPolarity(ICM42688P_SPI_CHANNEL, LL_SPI_POLARITY_HIGH);
-	LL_SPI_SetTransferBitOrder(ICM42688P_SPI_CHANNEL, LL_SPI_MSB_FIRST);
-	LL_SPI_SetDataWidth(ICM42688P_SPI_CHANNEL, LL_SPI_DATAWIDTH_8BIT);
-	LL_SPI_SetNSSMode(ICM42688P_SPI_CHANNEL, LL_SPI_NSS_SOFT);
-	LL_SPI_SetMode(ICM42688P_SPI_CHANNEL, LL_SPI_MODE_MASTER);
-
-	// STM32H7 specific settings
-	LL_SPI_SetFIFOThreshold(ICM42688P_SPI_CHANNEL, LL_SPI_FIFO_TH_01DATA);
-
-	// Enable SPI
 	LL_SPI_Enable(ICM42688P_SPI_CHANNEL);
-
-	// Start SPI (STM32H7 requirement)
-	LL_SPI_StartMasterTransfer(ICM42688P_SPI_CHANNEL);
 
 	CHIP_DESELECT(ICM42688P);
 
 	printf("SPI3 initialized for STM32H7\n");
 }
 
-
+// ====== BANK SELECT ======
+void ICM42688P_SelectBank(uint8_t bank)
+{
+	printf("Selecting bank %d\n", bank);
+	ICM42688P_WriteByte(ICM42688P_REG_BANK_SEL, bank);
+	HAL_Delay(1); // Small delay after bank selection
+}
 
 uint8_t SPI3_SendByte(uint8_t data)
 {
@@ -96,12 +96,12 @@ uint8_t SPI3_SendByte(uint8_t data)
 
 //////////////////////////////////////////////////////////////
 
-void ICM42688P_SelectBank(uint8_t bank)
-{
-	printf("Selecting bank %d\n", bank);
-	ICM42688P_WriteByte(ICM42688P_REG_BANK_SEL, bank);
-	HAL_Delay(1); // Small delay after bank selection
-}
+//void ICM42688P_SelectBank(uint8_t bank)
+//{
+//	printf("Selecting bank %d\n", bank);
+//	ICM42688P_WriteByte(ICM42688P_REG_BANK_SEL, bank);
+//	HAL_Delay(1); // Small delay after bank selection
+//}
 
 uint8_t ICM42688P_ReadByte(uint8_t reg_addr)
 {
@@ -116,9 +116,9 @@ uint8_t ICM42688P_ReadByte(uint8_t reg_addr)
 	return val;
 }
 
-void ICM42688P_ReadBytes(uint8_t reg_addr, uint8_t len, uint8_t* data)
+void ICM42688P_ReadBytes(unsigned char reg_addr, unsigned char len, unsigned char* data)
 {
-	uint8_t i = 0;
+	unsigned int i = 0;
 
 	CHIP_SELECT(ICM42688P);
 	SPI3_SendByte(reg_addr | 0x80); //Register. MSB 1 is read instruction.
@@ -137,9 +137,9 @@ void ICM42688P_WriteByte(uint8_t reg_addr, uint8_t val)
 	CHIP_DESELECT(ICM42688P);
 }
 
-void ICM42688P_WriteBytes(uint8_t reg_addr, uint8_t len, uint8_t* data)
+void ICM20602_Writebytes(unsigned char reg_addr, unsigned char len, unsigned char* data)
 {
-	uint8_t i = 0;
+	unsigned int i = 0;
 	CHIP_SELECT(ICM42688P);
 	SPI3_SendByte(reg_addr & 0x7F); //Register. MSB 0 is write instruction.
 	while(i < len)
@@ -152,145 +152,136 @@ void ICM42688P_WriteBytes(uint8_t reg_addr, uint8_t len, uint8_t* data)
 int ICM42688P_Initialization(void)
 {
 	uint8_t who_am_i = 0;
-	uint8_t retry_count = 0;
+	int16_t accel_raw_data[3] = {0};  // To remove offset
+	int16_t gyro_raw_data[3] = {0};   // To remove offset
 
 	ICM42688P_GPIO_SPI_Initialization();
 
 	printf("Checking ICM42688P...\n");
 
-	// Give some time for the sensor to power up
-	HAL_Delay(100);
+	// check WHO_AM_I (0x75)
+	who_am_i = ICM42688P_ReadByte(ICM42688P_WHO_AM_I);
 
-	// Try to communicate multiple times
-	for(retry_count = 0; retry_count < 5; retry_count++)
+	// who am i = 0x47
+	if(who_am_i == 0x47)
 	{
-		printf("Attempt %d: ", retry_count + 1);
+		printf("\nICM20602 who_am_i = 0x%02x...OK\n\n", who_am_i);
+	}
+	// recheck
+	else if(who_am_i != 0x47)
+	{
+		who_am_i = ICM42688P_ReadByte(ICM42688P_WHO_AM_I); // check again WHO_AM_I (0x75)
 
-		// Select Bank 0 (User Bank)
-		ICM42688P_SelectBank(ICM42688P_BANK_SEL_0);
-		HAL_Delay(10);
-
-		// Check WHO_AM_I (0x75)
-		who_am_i = ICM42688P_ReadByte(ICM42688P_WHO_AM_I);
-
-		printf("Read WHO_AM_I = 0x%02x\n", who_am_i);
-
-		// WHO_AM_I should be 0x47 for ICM42688P
-		if(who_am_i == ICM42688P_WHO_AM_I_VALUE)
-		{
-			printf("ICM42688P who_am_i = 0x%02x...OK\n", who_am_i);
-			break;
+		if (who_am_i != 0x47){
+			printf( "ICM42688P Not OK: 0x%02x Should be 0x%02x\n", who_am_i, 0x47);
+			return 1; //ERROR
 		}
-
-		HAL_Delay(50);
 	}
 
-	if(who_am_i != ICM42688P_WHO_AM_I_VALUE)
-	{
-		printf("ICM42688P Communication Failed! Read: 0x%02x, Expected: 0x%02x\n",
-		       who_am_i, ICM42688P_WHO_AM_I_VALUE);
-		printf("Check connections:\n");
-		printf("- SPI wiring (MOSI, MISO, SCK, CS)\n");
-		printf("- Power supply (3.3V)\n");
-		printf("- Pull-up on CS if needed\n");
-		return 1; //ERROR
-	}
-
-	// Device Reset
-	ICM42688P_WriteByte(ICM42688P_DEVICE_CONFIG, 0x01); // Soft reset
+	// Reset ICM42688P
+	// DEVICE_CONFIG 0x11
+	ICM42688P_WriteByte(ICM42688P_DEVICE_CONFIG, 0x01); // Software reset
 	HAL_Delay(50);
 
-	// Wait for reset to complete
-	do {
-		HAL_Delay(10);
-		who_am_i = ICM42688P_ReadByte(ICM42688P_DEVICE_CONFIG);
-	} while (who_am_i & 0x01);
+	// Wait for reset to complete and switch to user bank 0
+	ICM42688P_SelectBank(ICM42688P_BANK_SEL_0); // Select user bank 0
+	HAL_Delay(10);
 
-	// Configure Power Management
-	// Turn on gyro and accel in Low Noise mode
-	ICM42688P_WriteByte(ICM42688P_PWR_MGMT0,
-		ICM42688P_PWR_MGMT0_GYRO_MODE_LN | ICM42688P_PWR_MGMT0_ACCEL_MODE_LN);
+	// PWR_MGMT0 0x4E - Main power management
+	// Enable Gyro and Accel in Low Noise mode, keep temperature sensor enabled
+	ICM42688P_WriteByte(ICM42688P_PWR_MGMT0, ICM42688P_PWR_MGMT0_GYRO_MODE_LN | ICM42688P_PWR_MGMT0_ACCEL_MODE_LN);
+	// 온도센서 끄면 자이로 값 이상하게 출력됨 (same as original comment)
 	HAL_Delay(50);
 
-	// Configure Gyroscope
-	// Full scale: ±2000 dps, ODR: 1 kHz
-	ICM42688P_WriteByte(ICM42688P_GYRO_CONFIG0,
-		(ICM42688P_GYRO_FS_SEL_2000DPS << 5) | ICM42688P_ODR_1KHZ);
-	HAL_Delay(10);
+	// GYRO_CONFIG0 0x4F - Gyro configuration
+	// Set Gyro to ±2000dps and 1kHz ODR (equivalent to original 2000dps setting)
+	ICM42688P_WriteByte(ICM42688P_GYRO_CONFIG0, (ICM42688P_GYRO_FS_SEL_2000DPS << 5) | ICM42688P_ODR_1KHZ);
+	HAL_Delay(50);
 
-	// Configure Accelerometer
-	// Full scale: ±16g, ODR: 1 kHz
-	ICM42688P_WriteByte(ICM42688P_ACCEL_CONFIG0,
-		(ICM42688P_ACCEL_FS_SEL_16G << 5) | ICM42688P_ODR_1KHZ);
-	HAL_Delay(10);
+	// ACCEL_CONFIG0 0x50 - Accelerometer configuration
+	// Set Accel to ±16g and 1kHz ODR (equivalent to original 16g setting)
+	ICM42688P_WriteByte(ICM42688P_ACCEL_CONFIG0, (ICM42688P_ACCEL_FS_SEL_16G << 5) | ICM42688P_ODR_1KHZ);
+	HAL_Delay(50);
 
-	// Configure Gyro and Accel in Low Noise mode with filtering
-//	ICM42688P_WriteByte(ICM42688P_GYRO_ACCEL_CONFIG0, 0x44); // Enable anti-alias filter
-	ICM42688P_WriteByte(ICM42688P_GYRO_ACCEL_CONFIG0, 0x44);
-	HAL_Delay(10);
+	// GYRO_CONFIG1 0x51 - Gyro filter configuration
+	// Enable gyro DLPF with low-pass filter (equivalent to original 20Hz filter)
+	ICM42688P_WriteByte(ICM42688P_GYRO_CONFIG1, 0x16); // DLPF enabled, ~53Hz bandwidth at 1kHz ODR
+	HAL_Delay(50);
 
-	// Configure interrupts
-	// Enable data ready interrupt on INT1
-	ICM42688P_WriteByte(ICM42688P_INT_CONFIG, 0x12); // INT1 push-pull, active high
-	HAL_Delay(10);
+	// ACCEL_CONFIG1 0x53 - Accel filter configuration
+	// Enable accel DLPF with low-pass filter (equivalent to original 44.8Hz filter)
+	ICM42688P_WriteByte(ICM42688P_ACCEL_CONFIG1, 0x15); // DLPF enabled, ~53Hz bandwidth at 1kHz ODR
+	HAL_Delay(50);
 
-	ICM42688P_WriteByte(ICM42688P_INT_SOURCE0, 0x08); // UI data ready interrupt routed to INT1
-	HAL_Delay(10);
+	// TMST_CONFIG 0x54 - Timestamp configuration (optional)
+	ICM42688P_WriteByte(ICM42688P_TMST_CONFIG, 0x23); // Enable timestamp, 1kHz resolution
+	HAL_Delay(50);
+
+	// FIFO_CONFIG 0x16 - FIFO configuration (disable for this setup, equivalent to original)
+	ICM42688P_WriteByte(ICM42688P_FIFO_CONFIG, 0x00); // FIFO bypass mode
+	HAL_Delay(50);
+
+	// INT_CONFIG 0x14 - Interrupt configuration
+	ICM42688P_WriteByte(ICM42688P_INT_CONFIG, 0x12); // INT1 push-pull, active high, pulse mode
+	HAL_Delay(50);
+
+	// INT_CONFIG1 0x64 - Additional interrupt configuration
+	ICM42688P_WriteByte(ICM42688P_INT_CONFIG1, 0x00); // Default settings
+	HAL_Delay(50);
+
+	// INT_SOURCE0 0x65 - Enable data ready interrupt (equivalent to original INT_ENABLE)
+	ICM42688P_WriteByte(ICM42688P_INT_SOURCE0, 0x18); // Enable UI data ready interrupt for INT1
+	HAL_Delay(50);
 
 	printf("ICM42688P initialized successfully!\n");
 
 	return 0; //OK
 }
 
-void ICM42688P_Get6AxisRawData(int16_t* accel, int16_t* gyro)
+void ICM42688P_Get6AxisRawData(short* accel, short* gyro)
 {
-	uint8_t data[12];
+	unsigned char data[14];
+	ICM42688P_ReadBytes(ICM42688P_ACCEL_DATA_X1, 14, data);
 
-	// Read accelerometer and gyroscope data (starting from ACCEL_DATA_X1)
-	ICM42688P_ReadBytes(ICM42688P_ACCEL_DATA_X1, 12, data);
+	accel[0] = (data[0] << 8) | data[1];
+	accel[1] = (data[2] << 8) | data[3];
+	accel[2] = (data[4] << 8) | data[5];
 
-	// Parse accelerometer data (big endian)
-	accel[0] = (int16_t)((data[0] << 8) | data[1]);  // X-axis
-	accel[1] = (int16_t)((data[2] << 8) | data[3]);  // Y-axis
-	accel[2] = (int16_t)((data[4] << 8) | data[5]);  // Z-axis
-
-	// Parse gyroscope data (big endian)
-	gyro[1] = (int16_t)((data[6] << 8) | data[7]);   // X-axis
-	gyro[0] = (int16_t)((data[8] << 8) | data[9]);   // Y-axis
-	gyro[2] = (int16_t)((data[10] << 8) | data[11]); // Z-axis
+	gyro[0] = ((data[6] << 8) | data[7]);
+	gyro[1] = ((data[8] << 8) | data[9]);
+	gyro[2] = ((data[10] << 8) | data[11]);
 }
 
-void ICM42688P_Get3AxisGyroRawData(int16_t* gyro)
+void ICM42688P_Get3AxisGyroRawData(short* gyro)
 {
-	uint8_t data[6];
-
-	// Read gyroscope data (starting from GYRO_DATA_X1)
+	unsigned char data[6];
 	ICM42688P_ReadBytes(ICM42688P_GYRO_DATA_X1, 6, data);
 
-	// Parse gyroscope data (big endian)
-	gyro[1] = (int16_t)((data[0] << 8) | data[1]);  // X-axis
-	gyro[0] = (int16_t)((data[2] << 8) | data[3]);  // Y-axis
-	gyro[2] = (int16_t)((data[4] << 8) | data[5]);  // Z-axis
+	gyro[0] = ((data[0] << 8) | data[1]);
+	gyro[1] = ((data[2] << 8) | data[3]);
+	gyro[2] = ((data[4] << 8) | data[5]);
 }
 
-void ICM42688P_Get3AxisAccRawData(int16_t* accel)
+void ICM42688P_Get3AxisAccRawData(short* gyro)
 {
-	uint8_t data[6];
-
-	// Read accelerometer data (starting from ACCEL_DATA_X1)
+	unsigned char data[6];
 	ICM42688P_ReadBytes(ICM42688P_ACCEL_DATA_X1, 6, data);
 
-	// Parse accelerometer data (big endian)
-	accel[0] = (int16_t)((data[0] << 8) | data[1]);  // X-axis
-	accel[1] = (int16_t)((data[2] << 8) | data[3]);  // Y-axis
-	accel[2] = (int16_t)((data[4] << 8) | data[5]);  // Z-axis
+	gyro[0] = ((data[0] << 8) | data[1]);
+	gyro[1] = ((data[2] << 8) | data[3]);
+	gyro[2] = ((data[4] << 8) | data[5]);
 }
 
 int ICM42688P_DataReady(void)
 {
-	// Check if INT1 pin is high (data ready)
 	return LL_GPIO_IsInputPinSet(ICM42688P_INT1_PORT, ICM42688P_INT1_PIN);
 }
+
+//int ICM42688P_DataReady(void)
+//{
+//	// Check if INT1 pin is high (data ready)
+//	return LL_GPIO_IsInputPinSet(ICM42688P_INT1_PORT, ICM42688P_INT1_PIN);
+//}
 
 // Helper function to convert raw gyro data to degrees per second
 float ICM42688P_GyroRawToDPS(int16_t raw_data)
