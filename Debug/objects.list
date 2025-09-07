@@ -2,7 +2,6 @@
 "./Core/CMD/cmd.o"
 "./Core/EEPROM/eeprom.o"
 "./Core/HMC5883L/hmc5883l.o"
-"./Core/IMU/ICM20948/ICM20948.o"
 "./Core/IMU/ICM42688P/icm42688p.o"
 "./Core/LED/MAIN_BOARD_RGB/ws2812.o"
 "./Core/RECEIVER/FS-iA6B/FS-iA6B.o"

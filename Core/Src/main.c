@@ -141,6 +141,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
+	short gyro_x_offset = -3, gyro_y_offset = -8, gyro_z_offset = 2;
+
 	unsigned char motor_arming_flag = 0;
 	unsigned short iBus_SwA_Prev = 0;
 	unsigned char iBus_rx_cnt = 0;
@@ -373,12 +376,30 @@ int main(void)
   if(ICM42688P_Initialization() == 0)
   {
 	  printf("=== Sensor Ready ===\n\n");
+	  ICM42688P_CalibrateAndWriteOffsets(2000);
   }
+
+//  float gyro_bias[3]  = { 0.5f, -0.2f,  1.0f };
+//  float accel_bias[3] = { 0.01f, -0.005f, 0.02f };
+//
+//  // Send to sensor hardware registers
+//  ICM42688P_WriteHWOffsets(gyro_bias, accel_bias);
+//
+//  printf("Static offsets sent to sensor!\n");
 
   HMC5883L_Init();
   uint8_t hmc_id = HMC5883L_ReadReg(HMC5883L_ID_A);
   printf("HMC5883L ID: %c\n", hmc_id);
   printf("\n");
+
+//  ICM42688P_WriteByte(0x13, (gyro_x_offset*-2)>>8);
+//  ICM42688P_WriteByte(0x14, (gyro_x_offset*-2));
+//
+//  ICM42688P_WriteByte(0x15, (gyro_y_offset*-2)>>8);
+//  ICM42688P_WriteByte(0x16, (gyro_y_offset*-2));
+//
+//  ICM42688P_WriteByte(0x17, (gyro_z_offset*-2)>>8);
+//  ICM42688P_WriteByte(0x18, (gyro_z_offset*-2));
 
   main_led(0, 0, 0, 255, 1);
   HAL_Delay(500);
@@ -449,7 +470,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-
 	  if(tim7_1ms_flag == 1)
 	  {
 		  tim7_1ms_flag = 0;
@@ -475,13 +495,13 @@ int main(void)
 
 //==============================================================================
 //
-		  printf("Gyro X: %.6f, Y: %.6f, Z: %.6f || Accel X: %.6f, Y: %.6f, Z: %.6f\n",
-				  ICM42688P.gyro_x,
-				  ICM42688P.gyro_y,
-				  ICM42688P.gyro_z,
-				  ICM42688P.acc_x,
-				  ICM42688P.acc_y,
-				  ICM42688P.acc_z);
+//		  printf("Gyro X: %.6f, Y: %.6f, Z: %.6f || Accel X: %.6f, Y: %.6f, Z: %.6f\n",
+//				  ICM42688P.gyro_x,
+//				  ICM42688P.gyro_y,
+//				  ICM42688P.gyro_z,
+//				  ICM42688P.acc_x,
+//				  ICM42688P.acc_y,
+//				  ICM42688P.acc_z);
 
 //		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
 	  }
@@ -529,28 +549,24 @@ int main(void)
 	  if(ICM42688P_DataReady() == 1)
 	  {
 
-		  LL_GPIO_TogglePin(GPIOE, LL_GPIO_PIN_4);
+		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
 
-		  ICM42688P_Get3AxisGyroRawData(&ICM42688P.gyro_x_raw);
-		  ICM42688P_Get3AxisAccRawData(&ICM42688P.acc_x_raw);
+		  ICM42688P_Get6AxisRawData(&ICM42688P.acc_x_raw, &ICM42688P.gyro_x_raw);
 
 		  ICM42688P.gyro_x = ICM42688P.gyro_x_raw * 2000.f / 32768.f;
 		  ICM42688P.gyro_y = ICM42688P.gyro_y_raw * 2000.f / 32768.f;
 		  ICM42688P.gyro_z = ICM42688P.gyro_z_raw * 2000.f / 32768.f;
 
-		  ICM42688P.gyro_x = -ICM42688P.gyro_x;
-		  ICM42688P.gyro_z = -ICM42688P.gyro_z;
-
 		  ICM42688P.acc_x = ICM42688P.acc_x_raw * 0.0004883f;
 		  ICM42688P.acc_y = ICM42688P.acc_y_raw * 0.0004883f;
 		  ICM42688P.acc_z = ICM42688P.acc_z_raw * 0.0004883f;
 
+//		  printf("%d, %d, %d, %d, %d, %d\n",
+//				  (int)(ICM42688P.gyro_x*100), (int)(ICM42688P.gyro_y*100), (int)(ICM42688P.gyro_z*100),
+//				  (int)(ICM42688P.acc_x), (int)(ICM42688P.acc_x), (int)(ICM42688P.acc_x));
 
-		  HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_3);
+		  printf("%d, %d, %d\n", ICM42688P.gyro_x_raw, ICM42688P.gyro_y_raw, ICM42688P.gyro_z_raw);
 
-
-		  //printf("%d,%d,%d\n", ICM20602.gyro_x_raw, ICM20602.gyro_y_raw, ICM20602.gyro_z_raw);
-//		  printf("%d,%d,%d\n", (int)(ICM42688P.gyro_x*100), (int)(ICM42688P.gyro_y*100), (int)(ICM42688P.gyro_z*100));
 	  }
 
   }

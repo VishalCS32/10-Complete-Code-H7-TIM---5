@@ -208,6 +208,11 @@ typedef struct _ICM42688P{
 	float gyro_y;
 	float gyro_z;
 	float temperature;
+
+	// Gyro offsets
+	float gyro_offset_x;
+	float gyro_offset_y;
+	float gyro_offset_z;
 }Struct_ICM42688P;
 
 /**

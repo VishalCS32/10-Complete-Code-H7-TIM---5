@@ -1,5 +1,6 @@
 #include "icm42688p.h"
 #include "stdio.h"
+#include <math.h>
 
 Struct_ICM42688P ICM42688P;
 
@@ -8,6 +9,14 @@ static uint8_t dma_tx_buffer[ICM42688P_DMA_BUFFER_SIZE];
 static uint8_t dma_rx_buffer[ICM42688P_DMA_BUFFER_SIZE];
 static volatile uint8_t dma_transfer_complete = 0;
 static volatile uint8_t dma_transfer_error = 0;
+
+// Clamp signed 12-bit value
+static inline int16_t clamp12(int32_t val)
+{
+    if (val > 2047) return 2047;
+    if (val < -2048) return -2048;
+    return (int16_t)val;
+}
 
 void ICM42688P_GPIO_SPI_Initialization(void)
 {
@@ -34,28 +43,13 @@ void ICM42688P_GPIO_SPI_Initialization(void)
 	GPIO_InitStruct.Alternate = LL_GPIO_AF_6; // SPI3 alternate function for STM32H7
 	LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	SPI_InitStruct.TransferDirection = LL_SPI_FULL_DUPLEX;
-	SPI_InitStruct.Mode = LL_SPI_MODE_MASTER;
-	SPI_InitStruct.DataWidth = LL_SPI_DATAWIDTH_8BIT;
-	SPI_InitStruct.ClockPolarity = LL_SPI_POLARITY_HIGH;
-	SPI_InitStruct.ClockPhase = LL_SPI_PHASE_2EDGE;
-	SPI_InitStruct.NSS = LL_SPI_NSS_SOFT;
-	SPI_InitStruct.BaudRate = LL_SPI_BAUDRATEPRESCALER_DIV8; //ICM-20602 MAX SPI CLK is 10MHz. But DIV2(42MHz) is available.
-	SPI_InitStruct.BitOrder = LL_SPI_MSB_FIRST;
-	SPI_InitStruct.CRCCalculation = LL_SPI_CRCCALCULATION_DISABLE;
-	SPI_InitStruct.CRCPoly = 10;
-	LL_SPI_Init(ICM42688P_SPI_CHANNEL, &SPI_InitStruct);
-	LL_SPI_SetStandard(ICM42688P_SPI_CHANNEL, LL_SPI_PROTOCOL_MOTOROLA);
-
 	/**ICM42688P GPIO Control Configuration
 	 * PA15  ------> ICM42688P_SPI_CS_PIN (output)
 	 * PC8   ------> ICM42688P_INT1_PIN (input)
 	 */
 
 	/* Chip Select Pin */
-//	LL_GPIO_SetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
-
-	LL_GPIO_ResetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
+	LL_GPIO_SetOutputPin(ICM42688P_SPI_CS_PORT, ICM42688P_SPI_CS_PIN); // Start with CS high
 
 	GPIO_InitStruct.Pin = ICM42688P_SPI_CS_PIN;
 	GPIO_InitStruct.Mode = LL_GPIO_MODE_OUTPUT;
@@ -70,7 +64,28 @@ void ICM42688P_GPIO_SPI_Initialization(void)
 	GPIO_InitStruct.Pull = LL_GPIO_PULL_UP;
 	LL_GPIO_Init(ICM42688P_INT1_PORT, &GPIO_InitStruct);
 
+	/* STM32H7 SPI3 configuration - Fixed for proper LL driver usage */
+	// Disable SPI first
+	LL_SPI_Disable(ICM42688P_SPI_CHANNEL);
+
+	// Configure SPI3 - STM32H7 style
+	LL_SPI_SetBaudRatePrescaler(ICM42688P_SPI_CHANNEL, LL_SPI_BAUDRATEPRESCALER_DIV8);
+	LL_SPI_SetTransferDirection(ICM42688P_SPI_CHANNEL, LL_SPI_FULL_DUPLEX);
+	LL_SPI_SetClockPhase(ICM42688P_SPI_CHANNEL, LL_SPI_PHASE_2EDGE);
+	LL_SPI_SetClockPolarity(ICM42688P_SPI_CHANNEL, LL_SPI_POLARITY_HIGH);
+	LL_SPI_SetTransferBitOrder(ICM42688P_SPI_CHANNEL, LL_SPI_MSB_FIRST);
+	LL_SPI_SetDataWidth(ICM42688P_SPI_CHANNEL, LL_SPI_DATAWIDTH_8BIT);
+	LL_SPI_SetNSSMode(ICM42688P_SPI_CHANNEL, LL_SPI_NSS_SOFT);
+	LL_SPI_SetMode(ICM42688P_SPI_CHANNEL, LL_SPI_MODE_MASTER);
+
+	// STM32H7 specific settings
+	LL_SPI_SetFIFOThreshold(ICM42688P_SPI_CHANNEL, LL_SPI_FIFO_TH_01DATA);
+
+	// Enable SPI
 	LL_SPI_Enable(ICM42688P_SPI_CHANNEL);
+
+	// Start SPI (STM32H7 requirement)
+	LL_SPI_StartMasterTransfer(ICM42688P_SPI_CHANNEL);
 
 	CHIP_DESELECT(ICM42688P);
 
@@ -195,12 +210,12 @@ int ICM42688P_Initialization(void)
 
 	// GYRO_CONFIG0 0x4F - Gyro configuration
 	// Set Gyro to ±2000dps and 1kHz ODR (equivalent to original 2000dps setting)
-	ICM42688P_WriteByte(ICM42688P_GYRO_CONFIG0, (ICM42688P_GYRO_FS_SEL_2000DPS << 5) | ICM42688P_ODR_1KHZ);
+	ICM42688P_WriteByte(ICM42688P_GYRO_CONFIG0, (ICM42688P_GYRO_FS_SEL_2000DPS << 5) | ICM42688P_ODR_4KHZ);
 	HAL_Delay(50);
 
 	// ACCEL_CONFIG0 0x50 - Accelerometer configuration
 	// Set Accel to ±16g and 1kHz ODR (equivalent to original 16g setting)
-	ICM42688P_WriteByte(ICM42688P_ACCEL_CONFIG0, (ICM42688P_ACCEL_FS_SEL_16G << 5) | ICM42688P_ODR_1KHZ);
+	ICM42688P_WriteByte(ICM42688P_ACCEL_CONFIG0, (ICM42688P_ACCEL_FS_SEL_16G << 5) | ICM42688P_ODR_4KHZ);
 	HAL_Delay(50);
 
 	// GYRO_CONFIG1 0x51 - Gyro filter configuration
@@ -325,36 +340,36 @@ int16_t ICM42688P_GetTemperatureRaw(void)
 }
 
 // Function to update all sensor data in the structure
-void ICM42688P_UpdateAllData(void)
-{
-	int16_t accel_raw[3], gyro_raw[3];
-
-	// Get raw data
-	ICM42688P_Get6AxisRawData(accel_raw, gyro_raw);
-	ICM42688P.temperature_raw = ICM42688P_GetTemperatureRaw();
-
-	// Store raw data
-	ICM42688P.acc_x_raw = accel_raw[0];
-	ICM42688P.acc_y_raw = accel_raw[1];
-	ICM42688P.acc_z_raw = accel_raw[2];
-
-	ICM42688P.gyro_x_raw = gyro_raw[0];
-	ICM42688P.gyro_y_raw = gyro_raw[1];
-	ICM42688P.gyro_z_raw = gyro_raw[2];
-
-	// Convert to physical units
-	ICM42688P.acc_x = ICM42688P_AccelRawToG(accel_raw[0]);
-	ICM42688P.acc_y = ICM42688P_AccelRawToG(accel_raw[1]);
-	ICM42688P.acc_z = ICM42688P_AccelRawToG(accel_raw[2]);
-
-	ICM42688P.gyro_x = ICM42688P_GyroRawToDPS(gyro_raw[0]);
-	ICM42688P.gyro_y = ICM42688P_GyroRawToDPS(gyro_raw[1]);
-	ICM42688P.gyro_z = ICM42688P_GyroRawToDPS(gyro_raw[2]);
-
-
-
-	ICM42688P.temperature = ICM42688P_TempRawToCelsius(ICM42688P.temperature_raw);
-}
+//void ICM42688P_UpdateAllData(void)
+//{
+//	int16_t accel_raw[3], gyro_raw[3];
+//
+//	// Get raw data
+//	ICM42688P_Get6AxisRawData(accel_raw, gyro_raw);
+//	ICM42688P.temperature_raw = ICM42688P_GetTemperatureRaw();
+//
+//	// Store raw data
+//	ICM42688P.acc_x_raw = accel_raw[0];
+//	ICM42688P.acc_y_raw = accel_raw[1];
+//	ICM42688P.acc_z_raw = accel_raw[2];
+//
+//	ICM42688P.gyro_x_raw = gyro_raw[0];
+//	ICM42688P.gyro_y_raw = gyro_raw[1];
+//	ICM42688P.gyro_z_raw = gyro_raw[2];
+//
+//	// Convert to physical units
+//	ICM42688P.acc_x = ICM42688P_AccelRawToG(accel_raw[0]);
+//	ICM42688P.acc_y = ICM42688P_AccelRawToG(accel_raw[1]);
+//	ICM42688P.acc_z = ICM42688P_AccelRawToG(accel_raw[2]);
+//
+//	ICM42688P.gyro_x = ICM42688P_GyroRawToDPS(gyro_raw[0]);
+//	ICM42688P.gyro_y = ICM42688P_GyroRawToDPS(gyro_raw[1]);
+//	ICM42688P.gyro_z = ICM42688P_GyroRawToDPS(gyro_raw[2]);
+//
+//
+//
+//	ICM42688P.temperature = ICM42688P_TempRawToCelsius(ICM42688P.temperature_raw);
+//}
 
 void ICM42688P_UpdateAllData_Radians(void)
 {
@@ -384,4 +399,189 @@ void ICM42688P_UpdateAllData_Radians(void)
     ICM42688P.gyro_z_rad = ICM42688P_GyroRawToRadPerSec(gyro_raw[2]);
 
     ICM42688P.temperature = ICM42688P_TempRawToCelsius(ICM42688P.temperature_raw);
+}
+
+
+void ICM42688P_CalibrateGyro(uint16_t samples)
+{
+    int32_t sum_x = 0, sum_y = 0, sum_z = 0;
+    int16_t gyro[3];
+
+    printf("Calibrating gyro... keep sensor still!\n");
+
+    for(uint16_t i = 0; i < samples; i++)
+    {
+        ICM42688P_Get3AxisGyroRawData(gyro);
+        sum_x += gyro[0];
+        sum_y += gyro[1];
+        sum_z += gyro[2];
+
+        HAL_Delay(2); // small delay (depends on your ODR)
+    }
+
+    ICM42688P.gyro_offset_x = (float)sum_x / samples;
+    ICM42688P.gyro_offset_y = (float)sum_y / samples;
+    ICM42688P.gyro_offset_z = (float)sum_z / samples;
+
+    printf("Gyro calibration done. Offsets: X=%.2f, Y=%.2f, Z=%.2f\n",
+            ICM42688P.gyro_offset_x,
+            ICM42688P.gyro_offset_y,
+            ICM42688P.gyro_offset_z);
+}
+
+void ICM42688P_UpdateAllData(void)
+{
+    int16_t accel_raw[3], gyro_raw[3];
+
+    // Get raw data
+    ICM42688P_Get6AxisRawData(accel_raw, gyro_raw);
+    ICM42688P.temperature_raw = ICM42688P_GetTemperatureRaw();
+
+    // Store raw data
+    ICM42688P.acc_x_raw = accel_raw[0];
+    ICM42688P.acc_y_raw = accel_raw[1];
+    ICM42688P.acc_z_raw = accel_raw[2];
+
+    // Apply gyro offset correction
+    ICM42688P.gyro_x_raw = gyro_raw[0] - (int16_t)ICM42688P.gyro_offset_x;
+    ICM42688P.gyro_y_raw = gyro_raw[1] - (int16_t)ICM42688P.gyro_offset_y;
+    ICM42688P.gyro_z_raw = gyro_raw[2] - (int16_t)ICM42688P.gyro_offset_z;
+
+    // Convert to physical units
+    ICM42688P.acc_x = ICM42688P_AccelRawToG(accel_raw[0]);
+    ICM42688P.acc_y = ICM42688P_AccelRawToG(accel_raw[1]);
+    ICM42688P.acc_z = ICM42688P_AccelRawToG(accel_raw[2]);
+
+    ICM42688P.gyro_x = ICM42688P_GyroRawToDPS(ICM42688P.gyro_x_raw);
+    ICM42688P.gyro_y = ICM42688P_GyroRawToDPS(ICM42688P.gyro_y_raw);
+    ICM42688P.gyro_z = ICM42688P_GyroRawToDPS(ICM42688P.gyro_z_raw);
+
+    ICM42688P.temperature = ICM42688P_TempRawToCelsius(ICM42688P.temperature_raw);
+}
+
+void ICM42688P_CalibrateGyroToRegisters(uint16_t samples)
+{
+    int32_t sum_x = 0, sum_y = 0, sum_z = 0;
+    int16_t gyro[3];
+
+    printf("Calibrating gyro in hardware... keep sensor still!\n");
+
+    for(uint16_t i = 0; i < samples; i++)
+    {
+        ICM42688P_Get3AxisGyroRawData(gyro);
+        sum_x += gyro[0];
+        sum_y += gyro[1];
+        sum_z += gyro[2];
+        HAL_Delay(2);
+    }
+
+    int16_t offset_x = -(sum_x / samples);
+    int16_t offset_y = -(sum_y / samples);
+    int16_t offset_z = -(sum_z / samples);
+
+    // Write to registers
+    ICM42688P_SelectBank(1); // Offset registers are in Bank 1
+
+    ICM42688P_WriteByte(0x03, (offset_x >> 8) & 0xFF); // GYRO_X_OFFS_USRH
+    ICM42688P_WriteByte(0x04, offset_x & 0xFF);        // GYRO_X_OFFS_USRL
+
+    ICM42688P_WriteByte(0x05, (offset_y >> 8) & 0xFF); // GYRO_Y_OFFS_USRH
+    ICM42688P_WriteByte(0x06, offset_y & 0xFF);        // GYRO_Y_OFFS_USRL
+
+    ICM42688P_WriteByte(0x07, (offset_z >> 8) & 0xFF); // GYRO_Z_OFFS_USRH
+    ICM42688P_WriteByte(0x08, offset_z & 0xFF);        // GYRO_Z_OFFS_USRL
+
+    ICM42688P_SelectBank(0); // Back to user bank
+
+    printf("Gyro HW offsets written: X=%d, Y=%d, Z=%d\n",
+            offset_x, offset_y, offset_z);
+}
+
+void ICM42688P_WriteHWOffsets(float gyro_bias_dps[3], float accel_bias_g[3])
+{
+    // Convert gyro (1 LSB = 1/32 dps)
+    int16_t gx = clamp12((int32_t)roundf(-gyro_bias_dps[0] * 32.0f));
+    int16_t gy = clamp12((int32_t)roundf(-gyro_bias_dps[1] * 32.0f));
+    int16_t gz = clamp12((int32_t)roundf(-gyro_bias_dps[2] * 32.0f));
+
+    // Convert accel (1 LSB = 0.5 mg = 0.0005 g)
+    int16_t ax = clamp12((int32_t)roundf(-accel_bias_g[0] / 0.0005f));
+    int16_t ay = clamp12((int32_t)roundf(-accel_bias_g[1] / 0.0005f));
+    int16_t az = clamp12((int32_t)roundf(-accel_bias_g[2] / 0.0005f));
+
+    // Switch to USER BANK 4
+    ICM42688P_SelectBank(4);
+
+    // --- Write Gyro Offsets ---
+    ICM42688P_WriteByte(0x77, (uint8_t)(gx & 0xFF));                           // OFFSET_USER0
+    ICM42688P_WriteByte(0x78, (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))); // OFFSET_USER1
+    ICM42688P_WriteByte(0x79, (uint8_t)(gy & 0xFF));                           // OFFSET_USER2
+    ICM42688P_WriteByte(0x7A, (uint8_t)(gz & 0xFF));                           // OFFSET_USER3
+
+    // OFFSET_USER4 → bits split between GZ[11:8] and AX[11:8]
+    uint8_t off4 = ((gz >> 8) & 0x0F) | ((ax >> 8) << 4);
+    ICM42688P_WriteByte(0x7B, (uint8_t)(ax & 0xFF));                           // OFFSET_USER5
+    ICM42688P_WriteByte(0x7C, (uint8_t)(ay & 0xFF));                           // OFFSET_USER6
+
+    // OFFSET_USER7 → bits split between AY[11:8] and AZ[11:8]
+    uint8_t off7 = ((ay >> 8) & 0x0F) | ((az >> 8) << 4);
+
+    ICM42688P_WriteByte(0x7D, off4);                                           // OFFSET_USER4
+    ICM42688P_WriteByte(0x7E, off7);                                           // OFFSET_USER7
+    ICM42688P_WriteByte(0x7F, (uint8_t)(az & 0xFF));                           // OFFSET_USER8
+
+    // Switch back to USER BANK 0
+    ICM42688P_SelectBank(0);
+
+    printf("HW Offsets written: Gx=%d, Gy=%d, Gz=%d | Ax=%d, Ay=%d, Az=%d\n",
+           gx, gy, gz, ax, ay, az);
+}
+
+// Calibration function
+void ICM42688P_CalibrateAndWriteOffsets(uint16_t sample_count)
+{
+    int32_t gyro_sum[3] = {0}, accel_sum[3] = {0};
+    int16_t accel_raw[3], gyro_raw[3];
+
+    printf("Keep sensor still... collecting %d samples\n", sample_count);
+
+    for (uint16_t i = 0; i < sample_count; i++)
+    {
+        // Read raw sensor data
+        ICM42688P_Get6AxisRawData(accel_raw, gyro_raw);
+
+        gyro_sum[0] += gyro_raw[0];
+        gyro_sum[1] += gyro_raw[1];
+        gyro_sum[2] += gyro_raw[2];
+
+        accel_sum[0] += accel_raw[0];
+        accel_sum[1] += accel_raw[1];
+        accel_sum[2] += accel_raw[2];
+
+        HAL_Delay(2); // ~500Hz sampling if you wait 2ms
+    }
+
+    // Compute averages
+    float gyro_bias[3];
+    float accel_bias[3];
+
+    gyro_bias[0] = (float)gyro_sum[0] / sample_count * 0.061035f; // raw->dps
+    gyro_bias[1] = (float)gyro_sum[1] / sample_count * 0.061035f;
+    gyro_bias[2] = -(float)gyro_sum[2] / sample_count * 0.061035f;
+
+    accel_bias[0] = (float)accel_sum[0] / sample_count * 0.0004883f; // raw->g
+    accel_bias[1] = (float)accel_sum[1] / sample_count * 0.0004883f;
+    accel_bias[2] = (float)accel_sum[2] / sample_count * 0.0004883f;
+
+    // Correct accel Z so gravity = +1g
+    accel_bias[2] -= 1.0f;
+
+    printf("Calculated biases:\n");
+    printf(" Gyro (dps):  X=%.3f  Y=%.3f  Z=%.3f\n", gyro_bias[0], gyro_bias[1], gyro_bias[2]);
+    printf(" Accel (g):   X=%.4f Y=%.4f Z=%.4f\n", accel_bias[0], accel_bias[1], accel_bias[2]);
+
+    // Write into sensor HW registers
+    ICM42688P_WriteHWOffsets(gyro_bias, accel_bias);
+
+    printf("Biases written to ICM42688P HW registers!\n");
 }
