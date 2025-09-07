@@ -142,7 +142,7 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-	short gyro_x_offset = -3, gyro_y_offset = -8, gyro_z_offset = 2;
+	static int16_t gyro_offsets_lsb[3] = {8, 4, -2}; // Initialize to zero
 
 	unsigned char motor_arming_flag = 0;
 	unsigned short iBus_SwA_Prev = 0;
@@ -376,16 +376,20 @@ int main(void)
   if(ICM42688P_Initialization() == 0)
   {
 	  printf("=== Sensor Ready ===\n\n");
-	  ICM42688P_CalibrateAndWriteOffsets(2000);
+
+//	  ===================  Gyro Offset Calibration  ==================
+
+	  //  int result = ICM42688P_CalibrateGyroRawOffsets(2000, gyro_offsets_lsb);
+	  //  if (result == 0) {
+	  //	  printf("Calibration complete: Gx=%d, Gy=%d, Gz=%d LSB\n",
+	  //			  gyro_offsets_lsb[0], gyro_offsets_lsb[1], gyro_offsets_lsb[2]);
+	  //  }
+
+//	  =================  Gyro Offset Calibration END  =================
+
   }
 
-//  float gyro_bias[3]  = { 0.5f, -0.2f,  1.0f };
-//  float accel_bias[3] = { 0.01f, -0.005f, 0.02f };
-//
-//  // Send to sensor hardware registers
-//  ICM42688P_WriteHWOffsets(gyro_bias, accel_bias);
-//
-//  printf("Static offsets sent to sensor!\n");
+
 
   HMC5883L_Init();
   uint8_t hmc_id = HMC5883L_ReadReg(HMC5883L_ID_A);
@@ -401,20 +405,20 @@ int main(void)
 //  ICM42688P_WriteByte(0x17, (gyro_z_offset*-2)>>8);
 //  ICM42688P_WriteByte(0x18, (gyro_z_offset*-2));
 
-  main_led(0, 0, 0, 255, 1);
-  HAL_Delay(500);
-  main_led(0, 0, 0, 255, 0);
-  HAL_Delay(500);
-  main_led(0, 0, 0, 255, 1);
-  HAL_Delay(500);
-  main_led(0, 0, 0, 255, 0);
-  HAL_Delay(500);
-  main_led(0, 0, 255, 0, 1);
-  HAL_Delay(500);
-  main_led(0, 0, 255, 0, 0);
-  HAL_Delay(500);
-
-  main_led(0, 0, 255, 0, 1);
+//  main_led(0, 0, 0, 255, 1);
+//  HAL_Delay(500);
+//  main_led(0, 0, 0, 255, 0);
+//  HAL_Delay(500);
+//  main_led(0, 0, 0, 255, 1);
+//  HAL_Delay(500);
+//  main_led(0, 0, 0, 255, 0);
+//  HAL_Delay(500);
+//  main_led(0, 0, 255, 0, 1);
+//  HAL_Delay(500);
+//  main_led(0, 0, 255, 0, 0);
+//  HAL_Delay(500);
+//
+//  main_led(0, 0, 255, 0, 1);
 
 
 //  while (Is_iBus_Throttle_Armed() == 0) {
@@ -553,9 +557,14 @@ int main(void)
 
 		  ICM42688P_Get6AxisRawData(&ICM42688P.acc_x_raw, &ICM42688P.gyro_x_raw);
 
-		  ICM42688P.gyro_x = ICM42688P.gyro_x_raw * 2000.f / 32768.f;
-		  ICM42688P.gyro_y = ICM42688P.gyro_y_raw * 2000.f / 32768.f;
-		  ICM42688P.gyro_z = ICM42688P.gyro_z_raw * 2000.f / 32768.f;
+		  // Apply gyro offsets in software (subtract offsets from raw data)
+		  int16_t gyro_x_corrected = ICM42688P.gyro_x_raw + gyro_offsets_lsb[0];	//  8
+		  int16_t gyro_y_corrected = ICM42688P.gyro_y_raw + gyro_offsets_lsb[1];	//  4
+		  int16_t gyro_z_corrected = ICM42688P.gyro_z_raw + gyro_offsets_lsb[2];	// -2
+
+		  ICM42688P.gyro_x = gyro_x_corrected * 2000.f / 32768.f;
+		  ICM42688P.gyro_y = gyro_y_corrected * 2000.f / 32768.f;
+		  ICM42688P.gyro_z = gyro_z_corrected * 2000.f / 32768.f;
 
 		  ICM42688P.acc_x = ICM42688P.acc_x_raw * 0.0004883f;
 		  ICM42688P.acc_y = ICM42688P.acc_y_raw * 0.0004883f;
@@ -565,7 +574,11 @@ int main(void)
 //				  (int)(ICM42688P.gyro_x*100), (int)(ICM42688P.gyro_y*100), (int)(ICM42688P.gyro_z*100),
 //				  (int)(ICM42688P.acc_x), (int)(ICM42688P.acc_x), (int)(ICM42688P.acc_x));
 
-		  printf("%d, %d, %d\n", ICM42688P.gyro_x_raw, ICM42688P.gyro_y_raw, ICM42688P.gyro_z_raw);
+		  printf("%d, %d, %d\n",
+				  (int)(ICM42688P.gyro_x), (int)(ICM42688P.gyro_y), (int)(ICM42688P.gyro_z));
+
+
+//		  printf("%d, %d, %d\n", gyro_x_corrected, gyro_y_corrected, gyro_z_corrected);
 
 	  }
 

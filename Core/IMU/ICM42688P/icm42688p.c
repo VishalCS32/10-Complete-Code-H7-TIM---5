@@ -11,11 +11,10 @@ static volatile uint8_t dma_transfer_complete = 0;
 static volatile uint8_t dma_transfer_error = 0;
 
 // Clamp signed 12-bit value
-static inline int16_t clamp12(int32_t val)
-{
-    if (val > 2047) return 2047;
-    if (val < -2048) return -2048;
-    return (int16_t)val;
+int16_t clamp12(int32_t value) {
+    if (value > 2047) return 2047;
+    if (value < -2048) return -2048;
+    return (int16_t)value;
 }
 
 void ICM42688P_GPIO_SPI_Initialization(void)
@@ -497,91 +496,367 @@ void ICM42688P_CalibrateGyroToRegisters(uint16_t samples)
             offset_x, offset_y, offset_z);
 }
 
-void ICM42688P_WriteHWOffsets(float gyro_bias_dps[3], float accel_bias_g[3])
+// Writes gyro hardware offsets to ICM42688P registers in Bank 4
+// Retries writes up to 3 times if verification fails
+// Returns 0 on success, non-zero on failure
+int ICM42688P_WriteHWOffsets(float gyro_bias_dps[3])
 {
-    // Convert gyro (1 LSB = 1/32 dps)
+    // Validate input array
+    if (!gyro_bias_dps) {
+        printf("Error: Null pointer passed to ICM42688P_WriteHWOffsets\n");
+        return -1;
+    }
+
+    // Convert gyro biases to LSBs (1 LSB = 1/32 dps for ±2000 dps)
     int16_t gx = clamp12((int32_t)roundf(-gyro_bias_dps[0] * 32.0f));
     int16_t gy = clamp12((int32_t)roundf(-gyro_bias_dps[1] * 32.0f));
     int16_t gz = clamp12((int32_t)roundf(-gyro_bias_dps[2] * 32.0f));
 
-    // Convert accel (1 LSB = 0.5 mg = 0.0005 g)
-    int16_t ax = clamp12((int32_t)roundf(-accel_bias_g[0] / 0.0005f));
-    int16_t ay = clamp12((int32_t)roundf(-accel_bias_g[1] / 0.0005f));
-    int16_t az = clamp12((int32_t)roundf(-accel_bias_g[2] / 0.0005f));
+    int retries = 3;
+    int verification_failed = 1;
 
-    // Switch to USER BANK 4
-    ICM42688P_SelectBank(4);
+    while (retries-- && verification_failed) {
+        // Switch to USER BANK 4
+        ICM42688P_SelectBank(4);
+        HAL_Delay(1); // Ensure bank switch completes
 
-    // --- Write Gyro Offsets ---
-    ICM42688P_WriteByte(0x77, (uint8_t)(gx & 0xFF));                           // OFFSET_USER0
-    ICM42688P_WriteByte(0x78, (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))); // OFFSET_USER1
-    ICM42688P_WriteByte(0x79, (uint8_t)(gy & 0xFF));                           // OFFSET_USER2
-    ICM42688P_WriteByte(0x7A, (uint8_t)(gz & 0xFF));                           // OFFSET_USER3
+        // Write gyro offsets
+        ICM42688P_WriteByte(0x77, (uint8_t)(gx & 0xFF));                           // OFFSET_USER0: Gx[7:0]
+        ICM42688P_WriteByte(0x78, (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))); // OFFSET_USER1: Gx[11:8] | Gy[11:8]
+        ICM42688P_WriteByte(0x79, (uint8_t)(gy & 0xFF));                           // OFFSET_USER2: Gy[7:0]
+        ICM42688P_WriteByte(0x7A, (uint8_t)(gz & 0xFF));                           // OFFSET_USER3: Gz[7:0]
+        ICM42688P_WriteByte(0x7D, (uint8_t)((gz >> 8) & 0x0F));                    // OFFSET_USER4: Gz[11:8]
 
-    // OFFSET_USER4 → bits split between GZ[11:8] and AX[11:8]
-    uint8_t off4 = ((gz >> 8) & 0x0F) | ((ax >> 8) << 4);
-    ICM42688P_WriteByte(0x7B, (uint8_t)(ax & 0xFF));                           // OFFSET_USER5
-    ICM42688P_WriteByte(0x7C, (uint8_t)(ay & 0xFF));                           // OFFSET_USER6
+        // Verify written offsets
+        uint8_t read_back[5];
+        ICM42688P_ReadBytes(0x77, 5, read_back);
+        verification_failed = 0;
 
-    // OFFSET_USER7 → bits split between AY[11:8] and AZ[11:8]
-    uint8_t off7 = ((ay >> 8) & 0x0F) | ((az >> 8) << 4);
+        if (read_back[0] != (uint8_t)(gx & 0xFF)) {
+            printf("Error: OFFSET_USER0 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gx & 0xFF), read_back[0]);
+            verification_failed = 1;
+        }
+        if (read_back[1] != (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))) {
+            printf("Error: OFFSET_USER1 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4)), read_back[1]);
+            verification_failed = 1;
+        }
+        if (read_back[2] != (uint8_t)(gy & 0xFF)) {
+            printf("Error: OFFSET_USER2 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gy & 0xFF), read_back[2]);
+            verification_failed = 1;
+        }
+        if (read_back[3] != (uint8_t)(gz & 0xFF)) {
+            printf("Error: OFFSET_USER3 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gz & 0xFF), read_back[3]);
+            verification_failed = 1;
+        }
+        if (read_back[4] != (uint8_t)((gz >> 8) & 0x0F)) {
+            printf("Error: OFFSET_USER4 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)((gz >> 8) & 0x0F), read_back[4]);
+            verification_failed = 1;
+        }
 
-    ICM42688P_WriteByte(0x7D, off4);                                           // OFFSET_USER4
-    ICM42688P_WriteByte(0x7E, off7);                                           // OFFSET_USER7
-    ICM42688P_WriteByte(0x7F, (uint8_t)(az & 0xFF));                           // OFFSET_USER8
+        if (verification_failed) {
+            printf("Retrying offset write (%d attempts left)\n", retries);
+            HAL_Delay(10); // Delay before retry
+        }
+    }
 
     // Switch back to USER BANK 0
     ICM42688P_SelectBank(0);
+    HAL_Delay(1); // Ensure bank switch completes
 
-    printf("HW Offsets written: Gx=%d, Gy=%d, Gz=%d | Ax=%d, Ay=%d, Az=%d\n",
-           gx, gy, gz, ax, ay, az);
+    // Print written offsets
+    printf("HW Gyro Offsets written: Gx=%d, Gy=%d, Gz=%d\n", gx, gy, gz);
+
+    // Return status
+    return verification_failed ? -2 : 0;
 }
 
-// Calibration function
-void ICM42688P_CalibrateAndWriteOffsets(uint16_t sample_count)
+// Calibrates the ICM42688P gyro and writes offsets to hardware registers
+// Assumes sensor is configured for ±2000 dps gyro
+// Sensor must be still during calibration
+// Returns 0 on success, non-zero on failure
+int ICM42688P_CalibrateAndWriteOffsets(uint16_t sample_count)
 {
-    int32_t gyro_sum[3] = {0}, accel_sum[3] = {0};
-    int16_t accel_raw[3], gyro_raw[3];
+    // Validate sample count
+    if (sample_count == 0) {
+        printf("Error: sample_count must be greater than 0\n");
+        return -1;
+    }
 
-    printf("Keep sensor still... collecting %d samples\n", sample_count);
+    // Verify gyro configuration
+    ICM42688P_SelectBank(0);
+    uint8_t gyro_config = ICM42688P_ReadByte(ICM42688P_GYRO_CONFIG0);
+    if ((gyro_config & 0xE0) != (ICM42688P_GYRO_FS_SEL_2000DPS << 5)) {
+        printf("Error: Gyro full-scale range mismatch: expected ±2000 dps (read 0x%02X)\n", gyro_config);
+        return -2;
+    }
 
-    for (uint16_t i = 0; i < sample_count; i++)
-    {
-        // Read raw sensor data
-        ICM42688P_Get6AxisRawData(accel_raw, gyro_raw);
+    int32_t gyro_sum[3] = {0};
+    int16_t gyro_raw[3];
+    uint16_t valid_samples = 0;
 
-        gyro_sum[0] += gyro_raw[0];
-        gyro_sum[1] += gyro_raw[1];
-        gyro_sum[2] += gyro_raw[2];
+    // Collect one sample before calibration to check raw Z-axis
+    while (!ICM42688P_DataReady()) {
+        HAL_Delay(1);
+    }
+    ICM42688P_Get3AxisGyroRawData(gyro_raw);
+    printf("Pre-calibration raw gyro data: X=%d LSB (%.3f dps), Y=%d LSB (%.3f dps), Z=%d LSB (%.3f dps)\n",
+           gyro_raw[0], ICM42688P_GyroRawToDPS(gyro_raw[0]),
+           gyro_raw[1], ICM42688P_GyroRawToDPS(gyro_raw[1]),
+           gyro_raw[2], ICM42688P_GyroRawToDPS(gyro_raw[2]));
 
-        accel_sum[0] += accel_raw[0];
-        accel_sum[1] += accel_raw[1];
-        accel_sum[2] += accel_raw[2];
+    printf("Keep sensor still... collecting %d gyro samples\n", sample_count);
 
-        HAL_Delay(2); // ~500Hz sampling if you wait 2ms
+    // Collect samples, waiting for data ready interrupt
+    for (uint16_t i = 0; i < sample_count; i++) {
+        // Wait for data ready interrupt
+        uint32_t timeout = 1000; // 1 second timeout
+        while (!ICM42688P_DataReady() && timeout--) {
+            HAL_Delay(1);
+        }
+        if (timeout == 0) {
+            printf("Error: Data ready timeout during calibration\n");
+            return -3;
+        }
+
+        // Read raw gyro data
+        ICM42688P_Get3AxisGyroRawData(gyro_raw);
+
+        // Validate data (avoid outliers)
+        if (abs(gyro_raw[0]) < 32768 && abs(gyro_raw[1]) < 32768 && abs(gyro_raw[2]) < 32768) {
+            gyro_sum[0] += gyro_raw[0];
+            gyro_sum[1] += gyro_raw[1];
+            gyro_sum[2] += gyro_raw[2];
+            valid_samples++;
+        } else {
+            printf("Warning: Skipping outlier sample %d: X=%d, Y=%d, Z=%d\n",
+                   i, gyro_raw[0], gyro_raw[1], gyro_raw[2]);
+        }
+
+        // Delay based on ODR (4 kHz = 0.25 ms per sample, use 1 ms for safety)
+        HAL_Delay(1);
+    }
+
+    // Check if enough valid samples were collected
+    if (valid_samples < sample_count / 2) {
+        printf("Error: Too few valid samples (%d/%d)\n", valid_samples, sample_count);
+        return -4;
     }
 
     // Compute averages
     float gyro_bias[3];
-    float accel_bias[3];
+    gyro_bias[0] = (float)gyro_sum[0] / valid_samples * 0.061035f; // raw -> dps
+    gyro_bias[1] = (float)gyro_sum[1] / valid_samples * 0.061035f;
+    gyro_bias[2] = (float)gyro_sum[2] / valid_samples * 0.061035f;
 
-    gyro_bias[0] = (float)gyro_sum[0] / sample_count * 0.061035f; // raw->dps
-    gyro_bias[1] = (float)gyro_sum[1] / sample_count * 0.061035f;
-    gyro_bias[2] = -(float)gyro_sum[2] / sample_count * 0.061035f;
+    // Print raw averages and biases
+    printf("Raw averages (LSB, %d valid samples): X=%.2f, Y=%.2f, Z=%.2f\n",
+           valid_samples, (float)gyro_sum[0] / valid_samples,
+           (float)gyro_sum[1] / valid_samples, (float)gyro_sum[2] / valid_samples);
+    printf("Calculated gyro biases (dps): X=%.3f, Y=%.3f, Z=%.3f\n",
+           gyro_bias[0], gyro_bias[1], gyro_bias[2]);
 
-    accel_bias[0] = (float)accel_sum[0] / sample_count * 0.0004883f; // raw->g
-    accel_bias[1] = (float)accel_sum[1] / sample_count * 0.0004883f;
-    accel_bias[2] = (float)accel_sum[2] / sample_count * 0.0004883f;
+    // Write biases to hardware registers
+    int result = ICM42688P_WriteHWOffsets(gyro_bias);
+    if (result != 0) {
+        printf("Error: Failed to write gyro offsets to hardware registers\n");
+        return result;
+    }
 
-    // Correct accel Z so gravity = +1g
-    accel_bias[2] -= 1.0f;
+    // Verify Z-axis output after calibration
+    while (!ICM42688P_DataReady()) {
+        HAL_Delay(1);
+    }
+    ICM42688P_Get3AxisGyroRawData(gyro_raw);
+    printf("Post-calibration raw gyro data: X=%d LSB (%.3f dps), Y=%d LSB (%.3f dps), Z=%d LSB (%.3f dps)\n",
+           gyro_raw[0], ICM42688P_GyroRawToDPS(gyro_raw[0]),
+           gyro_raw[1], ICM42688P_GyroRawToDPS(gyro_raw[1]),
+           gyro_raw[2], ICM42688P_GyroRawToDPS(gyro_raw[2]));
 
-    printf("Calculated biases:\n");
-    printf(" Gyro (dps):  X=%.3f  Y=%.3f  Z=%.3f\n", gyro_bias[0], gyro_bias[1], gyro_bias[2]);
-    printf(" Accel (g):   X=%.4f Y=%.4f Z=%.4f\n", accel_bias[0], accel_bias[1], accel_bias[2]);
+    printf("Gyro biases successfully written to ICM42688P HW registers!\n");
+    return 0;
+}
 
-    // Write into sensor HW registers
-    ICM42688P_WriteHWOffsets(gyro_bias, accel_bias);
+// Applies hardcoded gyro offset values to ICM42688P registers in Bank 4
+// offsets_lsb: Array of 3 int16_t values for Gx, Gy, Gz in LSBs (e.g., Gz = -4 for 0.131 dps bias)
+// Returns 0 on success, non-zero on failure
+int ICM42688P_ApplyHardcodedGyroOffsets(int16_t offsets_lsb[3])
+{
+    // Validate input array
+    if (!offsets_lsb) {
+        printf("Error: Null pointer passed to ICM42688P_ApplyHardcodedGyroOffsets\n");
+        return -1;
+    }
 
-    printf("Biases written to ICM42688P HW registers!\n");
+    // Clamp offsets to 12-bit signed range (-2048 to 2047)
+    int16_t gx = clamp12(offsets_lsb[0]);
+    int16_t gy = clamp12(offsets_lsb[1]);
+    int16_t gz = clamp12(offsets_lsb[2]);
+
+    // Print offsets
+    printf("Applying hardcoded gyro offsets: Gx=%d LSB, Gy=%d LSB, Gz=%d LSB\n",
+           gx, gy, gz);
+
+    int retries = 3;
+    int verification_failed = 1;
+
+    while (retries-- && verification_failed) {
+        // Switch to USER BANK 4
+        ICM42688P_SelectBank(4);
+        HAL_Delay(2); // Increased delay for SPI stability
+
+        // Write gyro offsets with delays
+        ICM42688P_WriteByte(0x77, (uint8_t)(gx & 0xFF)); HAL_Delay(1);           // OFFSET_USER0: Gx[7:0]
+        ICM42688P_WriteByte(0x78, (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))); HAL_Delay(1); // OFFSET_USER1: Gx[11:8] | Gy[11:8]
+        ICM42688P_WriteByte(0x79, (uint8_t)(gy & 0xFF)); HAL_Delay(1);           // OFFSET_USER2: Gy[7:0]
+        ICM42688P_WriteByte(0x7A, (uint8_t)(gz & 0xFF)); HAL_Delay(1);           // OFFSET_USER3: Gz[7:0]
+        ICM42688P_WriteByte(0x7D, (uint8_t)((gz >> 8) & 0x0F)); HAL_Delay(1);    // OFFSET_USER4: Gz[11:8]
+
+        // Verify written offsets
+        uint8_t read_back[5];
+        ICM42688P_ReadBytes(0x77, 5, read_back);
+        verification_failed = 0;
+
+        if (read_back[0] != (uint8_t)(gx & 0xFF)) {
+            printf("Error: OFFSET_USER0 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gx & 0xFF), read_back[0]);
+            verification_failed = 1;
+        }
+        if (read_back[1] != (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4))) {
+            printf("Error: OFFSET_USER1 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(((gx >> 8) & 0x0F) | ((gy >> 8) << 4)), read_back[1]);
+            verification_failed = 1;
+        }
+        if (read_back[2] != (uint8_t)(gy & 0xFF)) {
+            printf("Error: OFFSET_USER2 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gy & 0xFF), read_back[2]);
+            verification_failed = 1;
+        }
+        if (read_back[3] != (uint8_t)(gz & 0xFF)) {
+            printf("Error: OFFSET_USER3 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)(gz & 0xFF), read_back[3]);
+            verification_failed = 1;
+        }
+        if (read_back[4] != (uint8_t)((gz >> 8) & 0x0F)) {
+            printf("Error: OFFSET_USER4 mismatch: wrote 0x%02X, read 0x%02X\n",
+                   (uint8_t)((gz >> 8) & 0x0F), read_back[4]);
+            verification_failed = 1;
+        }
+
+        if (verification_failed) {
+            printf("Retrying offset write (%d attempts left)\n", retries);
+            HAL_Delay(10); // Delay before retry
+        }
+    }
+
+    // Switch back to USER BANK 0
+    ICM42688P_SelectBank(0);
+    HAL_Delay(2); // Increased delay for stability
+
+    // Check post-offset gyro output
+    int16_t gyro[3];
+    while (!ICM42688P_DataReady()) {
+        HAL_Delay(1);
+    }
+    ICM42688P_Get3AxisGyroRawData(gyro);
+    printf("Post-offset raw gyro data: X=%d LSB, Y=%d LSB, Z=%d LSB\n",
+           gyro[0], gyro[1], gyro[2]);
+
+    // Return status
+    if (verification_failed) {
+        printf("Error: Failed to apply hardcoded gyro offsets\n");
+        return -2;
+    }
+
+    printf("Hardcoded gyro offsets successfully applied to ICM42688P HW registers!\n");
+    return 0;
+}
+
+int ICM42688P_CalibrateGyroRawOffsets(uint16_t sample_count, int16_t offsets_lsb[3])
+{
+    // Validate inputs
+    if (sample_count == 0) {
+        printf("Error: sample_count must be greater than 0\n");
+        return -1;
+    }
+    if (!offsets_lsb) {
+        printf("Error: Null pointer for offsets_lsb\n");
+        return -2;
+    }
+
+    // Verify gyro configuration (±2000 dps)
+    ICM42688P_SelectBank(0);
+    uint8_t gyro_config = ICM42688P_ReadByte(ICM42688P_GYRO_CONFIG0);
+    if ((gyro_config & 0xE0) != (ICM42688P_GYRO_FS_SEL_2000DPS << 5)) {
+        printf("Error: Gyro full-scale range mismatch: expected ±2000 dps (read 0x%02X)\n", gyro_config);
+        return -3;
+    }
+
+    int32_t gyro_sum[3] = {0};
+    int16_t gyro_raw[3];
+    uint16_t valid_samples = 0;
+
+    // Collect one sample before calibration to check raw Z-axis
+    while (!ICM42688P_DataReady()) {
+        HAL_Delay(1);
+    }
+    ICM42688P_Get3AxisGyroRawData(gyro_raw);
+    printf("Pre-calibration raw gyro data: X=%d LSB, Y=%d LSB, Z=%d LSB\n",
+           gyro_raw[0], gyro_raw[1], gyro_raw[2]);
+
+    printf("Keep sensor still... collecting %d gyro samples\n", sample_count);
+
+    // Collect samples
+    for (uint16_t i = 0; i < sample_count; i++) {
+        // Wait for data ready interrupt
+        uint32_t timeout = 1000; // 1 second timeout
+        while (!ICM42688P_DataReady() && timeout--) {
+            HAL_Delay(1);
+        }
+        if (timeout == 0) {
+            printf("Error: Data ready timeout during calibration\n");
+            return -4;
+        }
+
+        // Read raw gyro data
+        ICM42688P_Get3AxisGyroRawData(gyro_raw);
+
+        // Validate data (avoid outliers)
+        if (abs(gyro_raw[0]) < 32768 && abs(gyro_raw[1]) < 32768 && abs(gyro_raw[2]) < 32768) {
+            gyro_sum[0] += gyro_raw[0];
+            gyro_sum[1] += gyro_raw[1];
+            gyro_sum[2] += gyro_raw[2];
+            valid_samples++;
+        } else {
+            printf("Warning: Skipping outlier sample %d: X=%d, Y=%d, Z=%d\n",
+                   i, gyro_raw[0], gyro_raw[1], gyro_raw[2]);
+        }
+
+        // Delay based on ODR (4 kHz = 0.25 ms, use 1 ms for safety)
+        HAL_Delay(1);
+    }
+
+    // Check if enough valid samples were collected
+    if (valid_samples < sample_count / 2) {
+        printf("Error: Too few valid samples (%d/%d)\n", valid_samples, sample_count);
+        return -5;
+    }
+
+    // Compute raw offsets (negative of averages to cancel bias)
+    offsets_lsb[0] = clamp12((int32_t)roundf(-(float)gyro_sum[0] / valid_samples));
+    offsets_lsb[1] = clamp12((int32_t)roundf(-(float)gyro_sum[1] / valid_samples));
+    offsets_lsb[2] = clamp12((int32_t)roundf(-(float)gyro_sum[2] / valid_samples));
+
+    // Print results
+    printf("Raw averages (LSB, %d valid samples): X=%.2f, Y=%.2f, Z=%.2f\n",
+           valid_samples, (float)gyro_sum[0] / valid_samples,
+           (float)gyro_sum[1] / valid_samples, (float)gyro_sum[2] / valid_samples);
+    printf("Calculated gyro offsets (LSB): X=%d, Y=%d, Z=%d\n",
+           offsets_lsb[0], offsets_lsb[1], offsets_lsb[2]);
+
+    return 0;
 }
